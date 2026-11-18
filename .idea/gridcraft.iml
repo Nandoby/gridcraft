@@ -9,7 +9,15 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/model/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/numfmt/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/xlsx/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/apps/sheetcraft-cli/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/apps/sheetcraft-cli/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/apps/sheetcraft/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/chart/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/engine/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/mcp/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/ui-egui/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/xtask/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/ui-egui/examples" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

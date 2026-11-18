@@ -119,7 +119,8 @@ pub fn table_cell_style(wb: &Workbook, sheet: usize, t: &Table, c: CellRef) -> S
         }
         if let Some(l) = lk.line
             && t.style.contains("Light")
-            && c.row == t.range.end.row {
+            && c.row == t.range.end.row
+        {
             s.borders.bottom = BorderLine { style: BorderStyle::Thin, color: l };
         }
     }
