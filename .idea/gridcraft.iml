@@ -18,6 +18,8 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/ui-egui/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/xtask/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/apps/sheetcraft-web/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/engine/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/pdf/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/ui-egui/examples" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
