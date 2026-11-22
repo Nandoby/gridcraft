@@ -21,6 +21,11 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/engine/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/pdf/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/ui-egui/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/apps/gridcraft-cli/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/apps/gridcraft-cli/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/apps/gridcraft-web/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/apps/gridcraft/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/ui-egui/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

@@ -6,9 +6,9 @@
 
 use std::sync::Arc;
 
+use gridcraft_core::{CellRef, RangeRef};
+use gridcraft_model::*;
 use serde_json::{Value as Json, json};
-use sheetcraft_core::{CellRef, RangeRef};
-use sheetcraft_model::*;
 
 use super::*;
 use crate::pivot as pv;
@@ -635,7 +635,7 @@ fn summarize_table(s: &mut Session, p: &Json) -> Result<Json> {
         Some(n) => d.wb.table(n).and_then(|(si, ti)| d.wb.sheet(si).and_then(|sh| sh.tables.get(ti))).map(|t| t.name.clone()),
         None => d.wb.active().and_then(|sh| sh.table_at(d.selection.active)).map(|t| t.name.clone()),
     }
-        .ok_or_else(|| EngineError::Disabled("table.summarizePivot".into(), "select a cell in a table".into()))?;
+    .ok_or_else(|| EngineError::Disabled("table.summarizePivot".into(), "select a cell in a table".into()))?;
     let mut q = with(p, "source", json!(name));
     if let Some(m) = q.as_object_mut() {
         m.remove("table");
@@ -1280,8 +1280,8 @@ fn recommended(s: &mut Session, p: &Json) -> Result<Json> {
 
 #[cfg(test)]
 mod tests {
+    use gridcraft_core::{CellRef, Value};
     use serde_json::json;
-    use sheetcraft_core::{CellRef, Value};
 
     use crate::Session;
 
@@ -1316,7 +1316,7 @@ mod tests {
     fn text(s: &Session, a: &str) -> String {
         val(s, a).display()
     }
-    fn pt(s: &Session) -> sheetcraft_model::PivotTable {
+    fn pt(s: &Session) -> gridcraft_model::PivotTable {
         s.doc().unwrap().wb.active().unwrap().pivots.last().unwrap().clone()
     }
     /// Finds the row (0-based) whose first report column holds `label`.
