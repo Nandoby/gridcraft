@@ -9,7 +9,6 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod control_server;
-mod logging;
 #[cfg(target_os = "macos")]
 mod native_menu;
 
@@ -62,19 +61,8 @@ fn config_dir() -> Option<std::path::PathBuf> {
     }
 }
 
-/// Runs without preferences (`GRIDCRAFT_NO_PREFS`, agents' test runs) neither read nor write
-/// them, and keep no log file.
-fn prefs_enabled() -> bool {
-    std::env::var_os("GRIDCRAFT_NO_PREFS").is_none()
-}
-
-/// Where the log files live: `logs` in the settings folder, next to `ui.json` (see `logging`).
-fn log_dir() -> Option<std::path::PathBuf> {
-    Some(config_dir()?.join("logs"))
-}
-
 fn load_prefs(app: &mut SheetApp) {
-    if !prefs_enabled() {
+    if std::env::var_os("GRIDCRAFT_NO_PREFS").is_some() {
         return;
     }
     let Some(dir) = config_dir() else { return };
@@ -91,7 +79,7 @@ fn load_prefs(app: &mut SheetApp) {
 }
 
 fn save_prefs(app: &SheetApp) {
-    if !prefs_enabled() {
+    if std::env::var_os("GRIDCRAFT_NO_PREFS").is_some() {
         return;
     }
     let Some(dir) = config_dir() else { return };
@@ -145,26 +133,6 @@ fn icon() -> Option<egui::IconData> {
 }
 
 fn main() -> eframe::Result<()> {
-    // First, so the panic hook and every start-up warning are recorded (`logging`).
-    let logger = logging::install();
-    // Commands catch their panics (`Session::execute`), but the default hook only prints to
-    // standard error; this one sends every panic, caught or not, to the log file too, with a
-    // backtrace when RUST_BACKTRACE is set.
-    std::panic::set_hook(Box::new(|info| {
-        let trace = std::backtrace::Backtrace::capture();
-        let report = if trace.status() == std::backtrace::BacktraceStatus::Captured {
-            format!("internal error: {info}\n{trace}")
-        } else {
-            format!("internal error: {info}")
-        };
-        // Standard error and the log file; standard error alone when RUST_LOG turned errors off.
-        if log::log_enabled!(log::Level::Error) {
-            log::error!("{report}");
-        } else {
-            // `eprintln!` panics on a broken stderr pipe, and a panic inside the panic hook aborts.
-            let _ = std::io::Write::write_fmt(&mut std::io::stderr(), format_args!("gridcraft: {report}\n"));
-        }
-    }));
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("GridCraft {}", env!("CARGO_PKG_VERSION"));
@@ -189,29 +157,15 @@ fn main() -> eframe::Result<()> {
         }
         i += 1;
     }
-    // The log file lives in the settings folder, next to the preferences; opened after the
-    // arguments, so `--version` leaves no file behind. Records logged until now are written to it
-    // first. Runs without preferences (agents' test runs) log to standard error only, so they
-    // don't rotate away the user's own logs.
-    if let Some(logger) = logger {
-        match log_dir().filter(|_| prefs_enabled()) {
-            Some(dir) => match logger.attach_dir(&dir) {
-                Ok(path) => log::info!("GridCraft {}, log file {}", env!("CARGO_PKG_VERSION"), path.display()),
-                // Standard error only by now (`attach_dir` gave up on the file); unlike `eprintln!`, never panics.
-                Err(e) => log::warn!("no log file: {e}"),
-            },
-            None => logger.no_file(),
-        }
-    }
     let mut session = Session::new();
     if let Some(s) = &sample
         && let Err(e) = session.execute("file.new", json!({"sample": s}))
     {
-        log::warn!("sample {s}: {e}");
+        eprintln!("sample: {e}");
     }
     for f in &files {
         if let Err(e) = session.execute("file.open", json!({"path": f})) {
-            log::warn!("{f}: {e}");
+            eprintln!("{f}: {e}");
         }
     }
     if session.documents().is_empty() {
@@ -241,7 +195,7 @@ fn main() -> eframe::Result<()> {
             if let Some(port) = control_port {
                 match control_server::start(port, cc.egui_ctx.clone()) {
                     Ok(rx) => app.control_rx = Some(rx),
-                    Err(e) => log::error!("control channel on port {port}: {e}"),
+                    Err(e) => eprintln!("control channel on port {port}: {e}"),
                 }
             }
             Ok(Box::new(App(
