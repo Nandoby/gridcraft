@@ -4,7 +4,9 @@
 //! Every dialog is also reachable programmatically: `ui.dialog {name}` opens one,
 //! `ui.dialog.set {field, value}` edits a field and `ui.dialog.confirm` presses OK.
 
-use egui::{Color32, Key, vec2};
+use egui::{Color32, Key, Sense, Stroke, StrokeKind, vec2};
+
+use crate::icons::{self, Icon};
 use serde_json::{Map, Value as Json, json};
 
 use crate::SheetApp;
@@ -13,6 +15,7 @@ use crate::theme;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Field {
     Text { key: &'static str, label: &'static str },
+    Password { key: &'static str, label: &'static str },
     Number { key: &'static str, label: &'static str },
     Choice { key: &'static str, label: &'static str, options: Vec<(&'static str, &'static str)> },
     Check { key: &'static str, label: &'static str },
@@ -31,6 +34,12 @@ pub struct Dialog {
     pub search: String,
     pub list_index: usize,
     pub result: Option<Json>,
+    /// "Show password" is ticked: password fields show their text.
+    pub show_password: bool,
+    picture_inbox: Option<crate::Inbox>,
+    picture_target: Option<(u64, usize)>,
+    /// The dialog this one was opened from (Name Manager › New…): it comes back when this closes.
+    back: Option<Box<Dialog>>,
 }
 
 impl Dialog {
@@ -49,6 +58,10 @@ impl Dialog {
             search: String::new(),
             list_index: 0,
             result: None,
+            show_password: false,
+            picture_inbox: None,
+            picture_target: None,
+            back: None,
         }
     }
 
@@ -63,6 +76,10 @@ impl Dialog {
             search: String::new(),
             list_index: 0,
             result: None,
+            show_password: false,
+            picture_inbox: None,
+            picture_target: None,
+            back: None,
         }
     }
 
