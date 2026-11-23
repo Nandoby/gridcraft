@@ -148,6 +148,7 @@ pub(crate) fn input_to_cell(input: &str, old: Option<&Cell>, wb: &mut gridcraft_
             parsed = gridcraft_formula::parse(&text);
         }
         let expr = parsed.map_err(|e| EngineError::Other(format!("There's a problem with this formula: {e}")))?;
+        let expr = wb.name_call_case(expr);
         let mut cell = Cell::formula(Formula::from_expr(expr));
         cell.style = style;
         // Formulas whose result is a date/time get a format from functions like TODAY().
@@ -1175,11 +1176,7 @@ fn find(s: &mut Session, p: &Json) -> Result<Json> {
             .cells
             .iter()
             .filter_map(|(c, cell)| {
-                let text = if values || cell.formula.is_none() || crate::display::formula_hidden(&d.wb, sh, c) {
-                    crate::display::cell_text(&d.wb, sh, c)
-                } else {
-                    cell.input_text()
-                };
+                let text = if values || cell.formula.is_none() { crate::display::cell_text(&d.wb, sh, c) } else { cell.input_text() };
                 matches(&text, &what, case, whole).then_some((c, text))
             })
             .collect();
