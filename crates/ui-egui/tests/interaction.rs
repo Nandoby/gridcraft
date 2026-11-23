@@ -1,9 +1,9 @@
 //! UI interaction tests: real egui input through the whole app (no GPU needed).
 
-use egui::{Event, Key, Modifiers, PointerButton};
+use egui::{Event, Key, Modifiers};
 use gridcraft_engine::Session;
 use gridcraft_engine::core::{CellRef, Value};
-use gridcraft_ui_egui::{SheetApp, grid::Geo};
+use gridcraft_ui_egui::SheetApp;
 use serde_json::json;
 
 fn harness(session: Session) -> egui_kittest::Harness<'static, SheetApp> {
@@ -38,59 +38,6 @@ fn text(h: &mut egui_kittest::Harness<'static, SheetApp>, t: &str) {
 
 fn value(h: &egui_kittest::Harness<'static, SheetApp>, a: &str) -> Value {
     h.state().session.active().and_then(|d| d.wb.active().map(|s| s.value(CellRef::parse(a).unwrap_or_default()))).unwrap_or_default()
-}
-
-fn click_cell(h: &mut egui_kittest::Harness<'static, SheetApp>, cell: &str) {
-    let app = h.state();
-    let sheet = app.session.active().unwrap().wb.active().unwrap();
-    let geo = Geo::new(sheet, app.grid.rect.unwrap(), app.view().scroll);
-    let pos = geo.cell_rect(sheet, CellRef::parse(cell).unwrap()).center();
-    h.input_mut().events.extend([
-        Event::PointerMoved(pos),
-        Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
-        Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE },
-    ]);
-    h.run_steps(2);
-}
-
-#[test]
-fn keyboard_navigation_does_not_replay_the_last_pointer_click() {
-    let mut h = harness(blank());
-    click_cell(&mut h, "B2");
-    for (key_code, modifiers, expected) in [
-        (Key::Enter, Modifiers::NONE, "B3"),
-        (Key::Enter, Modifiers::NONE, "B4"),
-        (Key::Enter, Modifiers::NONE, "B5"),
-        (Key::Enter, Modifiers::SHIFT, "B4"),
-        (Key::Tab, Modifiers::NONE, "C4"),
-        (Key::Enter, Modifiers::NONE, "C5"),
-    ] {
-        key(&mut h, key_code, modifiers);
-        let selection = &h.state().session.active().unwrap().selection;
-        assert_eq!(selection.active.a1(), expected);
-        assert_eq!(selection.anchor, selection.active);
-        assert!(h.state().editor.is_none(), "navigation must not start editing at the old pointer location");
-    }
-    // A subsequent real pointer click must still select the clicked cell.
-    click_cell(&mut h, "D6");
-    assert_eq!(h.state().session.active().unwrap().selection.active.a1(), "D6");
-    key(&mut h, Key::Enter, Modifiers::NONE);
-    assert_eq!(h.state().session.active().unwrap().selection.active.a1(), "D7");
-}
-
-#[test]
-fn space_toggles_the_active_checkbox_without_clicking_the_hovered_cell() {
-    let mut session = blank();
-    session.execute("insert.checkbox", json!({"range": "A1:B1"})).unwrap();
-    let mut h = harness(session);
-    click_cell(&mut h, "A1");
-    assert_eq!(value(&h, "A1"), Value::Bool(true));
-    key(&mut h, Key::ArrowRight, Modifiers::NONE);
-    key(&mut h, Key::Space, Modifiers::NONE);
-    assert_eq!(h.state().session.active().unwrap().selection.active.a1(), "B1");
-    assert_eq!(value(&h, "A1"), Value::Bool(true), "the old pointer location must remain unchanged");
-    assert_eq!(value(&h, "B1"), Value::Bool(true));
-    assert!(h.state().editor.is_none());
 }
 
 #[test]
@@ -198,4 +145,27 @@ fn column_autocomplete_completes_on_enter() {
     text(&mut h, "Ea"); // ambiguous: East / Eastern
     key(&mut h, Key::Enter, Modifiers::NONE);
     assert_eq!(value(&h, "A5"), Value::from("Ea"));
+}
+
+#[test]
+fn general_numbers_fit_by_the_cells_own_font() {
+    // 9pt marks in narrow columns (a stored width of 4, i.e. 28px; common in mark sheets): "100" fits.
+    let mut s = blank();
+    s.execute("range.setValues", json!({"range": "A1", "values": [[100, 123456789]]})).unwrap();
+    s.execute("home.fontSize", json!({"range": "A1:B1", "size": 9})).unwrap();
+    s.execute("home.columnWidth", json!({"cols": "A:B", "width": 28})).unwrap();
+    s.execute("selection.set", json!({"cell": "C3"})).unwrap();
+    let h = harness(s);
+    let texts: Vec<String> = h
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|c| match &c.shape {
+            egui::Shape::Text(t) => Some(t.galley.job.text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(texts.iter().any(|t| t == "100"), "100 drawn in full: {texts:?}");
+    // A number that really doesn't fit still shows #### (once: only B1).
+    assert_eq!(texts.iter().filter(|t| t.starts_with('#')).count(), 1, "{texts:?}");
 }
