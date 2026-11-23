@@ -198,7 +198,6 @@ fn rewrite(wb: &mut gridcraft_model::Workbook, target: &str, e: &Edit) {
 
 fn insert_lines(s: &mut Session, p: &Json, axis: Axis) -> Result<Json> {
     let (at, count) = lines(s, p, axis)?;
-    check_lines_protection(s, p, axis, at, count, true)?;
     let sheet = target_sheet(s, p)?;
     // Refuse to push data off the sheet.
     let limit = if axis == Axis::Rows { MAX_ROWS } else { MAX_COLS };
@@ -210,7 +209,6 @@ fn insert_lines(s: &mut Session, p: &Json, axis: Axis) -> Result<Json> {
     }
     edit(s, |cx| {
         let name = cx.wb.sheet(sheet).map(|s| s.name.clone()).unwrap_or_default();
-        cx.protection_checked = true;
         {
             let sh = cx.sheet_mut(sheet)?;
             match axis {
@@ -237,11 +235,9 @@ fn insert_lines(s: &mut Session, p: &Json, axis: Axis) -> Result<Json> {
 
 fn delete_lines(s: &mut Session, p: &Json, axis: Axis) -> Result<Json> {
     let (at, count) = lines(s, p, axis)?;
-    check_lines_protection(s, p, axis, at, count, false)?;
     let sheet = target_sheet(s, p)?;
     edit(s, |cx| {
         let name = cx.wb.sheet(sheet).map(|s| s.name.clone()).unwrap_or_default();
-        cx.protection_checked = true;
         {
             let sh = cx.sheet_mut(sheet)?;
             let block = match axis {
@@ -363,39 +359,6 @@ fn edit_doc<R>(d: &mut crate::DocState, f: impl FnOnce(&mut Ctx) -> Result<R>) -
     super::commit(d, f)
 }
 
-/// Sheet protection for inserting or deleting rows/columns: the protection must allow it, and
-/// deleted lines must not hold locked cells.
-fn check_lines_protection(s: &Session, p: &Json, axis: Axis, at: u32, count: u32, insert: bool) -> Result<()> {
-    let sheet = target_sheet(s, p)?;
-    let wb = &s.doc()?.wb;
-    let Some(sh) = wb.sheet(sheet) else { return Ok(()) };
-    let Some(pr) = &sh.protection else { return Ok(()) };
-    let allowed = match (axis, insert) {
-        (Axis::Rows, true) => pr.insert_rows,
-        (Axis::Rows, false) => pr.delete_rows,
-        (Axis::Cols, true) => pr.insert_columns,
-        (Axis::Cols, false) => pr.delete_columns,
-    };
-    let locked = |st: gridcraft_model::StyleId| wb.styles.get(st).protection.locked;
-    let refuse = || EngineError::Other(PROTECTED.into());
-    if !allowed {
-        return Err(refuse());
-    }
-    if insert {
-        return Ok(());
-    }
-    let end = at.saturating_add(count - 1).min(if axis == Axis::Rows { MAX_ROWS - 1 } else { MAX_COLS - 1 });
-    let infos = if axis == Axis::Rows { &sh.rows } else { &sh.cols };
-    if (at..=end).any(|i| locked(infos.get(&i).and_then(|x| x.style).unwrap_or_default())) {
-        return Err(refuse());
-    }
-    let block = if axis == Axis::Rows { RangeRef::rows(at, end) } else { RangeRef::cols(at, end) };
-    if sh.cells.iter_range(block).any(|(_, cell)| locked(cell.style)) {
-        return Err(refuse());
-    }
-    Ok(())
-}
-
 fn delete_sheet(s: &mut Session, p: &Json) -> Result<Json> {
     let i = target_sheet(s, p)?;
     let d = s.doc()?;
@@ -428,6 +391,13 @@ fn delete_sheet(s: &mut Session, p: &Json) -> Result<Json> {
                 && *sc > i
             {
                 *sc -= 1;
+            }
+            // Names referring to the sheet become #REF!.
+            if let Ok(e) = gridcraft_formula::parse(&n.formula) {
+                let ne = gridcraft_formula::adjust::delete_sheet(e.clone(), &name);
+                if ne != e {
+                    n.formula = gridcraft_formula::print(&ne);
+                }
             }
         }
         if cx.wb.active_sheet >= cx.wb.sheets.len() || cx.wb.active_sheet > i {
@@ -498,10 +468,31 @@ fn move_sheet(s: &mut Session, p: &Json) -> Result<Json> {
         if copy {
             let mut sh = (*src).clone();
             let base = sh.name.clone();
-            let name = (2..).map(|k| format!("{base} ({k})")).find(|nm| cx.wb.sheet_index(nm).is_none()).unwrap_or(base);
+            let name = (2..).map(|k| format!("{base} ({k})")).find(|nm| cx.wb.sheet_index(nm).is_none()).unwrap_or(base.clone());
             sh.name = name.chars().take(31).collect();
             sh.tables.clear(); // table names must be unique
             let at = to.min(n);
+            // The copy gets its own copies of the sheet's names, referring to the copy.
+            let copies: Vec<gridcraft_model::DefinedName> = cx
+                .wb
+                .names
+                .iter()
+                .filter(|nm| nm.scope == Some(i))
+                .map(|nm| {
+                    let formula = gridcraft_formula::parse(&nm.formula)
+                        .map(|e| gridcraft_formula::print(&gridcraft_formula::adjust::rename_sheet(e, &base, &sh.name)))
+                        .unwrap_or_else(|_| nm.formula.clone());
+                    gridcraft_model::DefinedName { scope: Some(at), formula, ..nm.clone() }
+                })
+                .collect();
+            for nm in cx.wb.names.iter_mut() {
+                if let Some(sc) = nm.scope.as_mut()
+                    && *sc >= at
+                {
+                    *sc += 1;
+                }
+            }
+            cx.wb.names.extend(copies);
             cx.wb.sheets.insert(at, Arc::new(sh));
             cx.wb.active_sheet = at;
         } else {
@@ -509,6 +500,17 @@ fn move_sheet(s: &mut Session, p: &Json) -> Result<Json> {
             let at = to.min(n - 1);
             cx.wb.sheets.insert(at, sh);
             cx.wb.active_sheet = at;
+            // Sheet-level names follow their sheet.
+            for nm in cx.wb.names.iter_mut() {
+                if let Some(sc) = nm.scope.as_mut() {
+                    *sc = match *sc {
+                        x if x == i => at,
+                        x if i < x && x <= at => x - 1,
+                        x if at <= x && x < i => x + 1,
+                        x => x,
+                    };
+                }
+            }
         }
         cx.structural = true;
         Ok(Json::Null)
