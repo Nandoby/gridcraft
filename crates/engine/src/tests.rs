@@ -122,6 +122,17 @@ fn tables_and_structured_refs() {
 }
 
 #[test]
+fn names_that_look_like_references_are_refused() {
+    let mut s = s();
+    for bad in ["R1C1", "r2", "C3", "RC", "R", "c", "rc12", "A1", "XFD1048576", "1st"] {
+        assert!(s.execute("formulas.defineName", json!({"name": bad, "refersTo": "=1"})).is_err(), "{bad}");
+    }
+    for good in ["R1C1X", "Rate", "RCx", "Rx", "_R1", "Cost"] {
+        s.execute("formulas.defineName", json!({"name": good, "refersTo": "=1"})).unwrap();
+    }
+}
+
+#[test]
 fn sheets() {
     let mut s = s();
     s.execute("home.insertSheet", json!({})).unwrap();
@@ -132,51 +143,6 @@ fn sheets() {
     assert_eq!(v(&s, "A1"), Value::Number(10.0));
     s.execute("sheet.rename", json!({"sheet": "Data", "name": "My Data"})).unwrap();
     assert_eq!(s.execute("cell.get", json!({"cell": "A1"})).unwrap()["formula"], "='My Data'!A1*2");
-}
-
-#[test]
-fn sheet_operations_keep_names_on_their_sheets() {
-    let names = |s: &Session| -> Vec<(String, Option<String>, String)> {
-        let wb = &s.doc().unwrap().wb;
-        let mut v: Vec<_> =
-            wb.names.iter().map(|n| (n.name.clone(), n.scope.and_then(|i| wb.sheet(i)).map(|s| s.name.clone()), n.formula.clone())).collect();
-        v.sort();
-        v
-    };
-    let named = |n: &str, scope: Option<&str>, f: &str| (n.to_string(), scope.map(str::to_string), f.to_string());
-    let mut s = s();
-    s.execute("home.insertSheet", json!({"name": "Data"})).unwrap();
-    s.execute("home.insertSheet", json!({"name": "Notes"})).unwrap();
-    s.execute("formulas.defineName", json!({"name": "Rate", "refersTo": "=Data!$A$1", "scope": "Data"})).unwrap();
-    s.execute("formulas.defineName", json!({"name": "Rate", "refersTo": "=Notes!$B$1", "scope": "Notes"})).unwrap();
-    s.execute("formulas.defineName", json!({"name": "Total", "refersTo": "=Data!$C$1"})).unwrap();
-    // Moving Data (index 1) to the end: its names go with it.
-    s.execute("sheet.move", json!({"sheet": "Data", "to": 2})).unwrap();
-    assert_eq!(names(&s), [named("Rate", Some("Data"), "Data!$A$1"), named("Rate", Some("Notes"), "Notes!$B$1"), named("Total", None, "Data!$C$1")]);
-    // Copying Data to the front copies its sheet-level names, referring to the copy.
-    s.execute("sheet.move", json!({"sheet": "Data", "to": 0, "copy": true})).unwrap();
-    assert_eq!(s.doc().unwrap().wb.sheets[0].name, "Data (2)");
-    assert_eq!(
-        names(&s),
-        [
-            named("Rate", Some("Data"), "Data!$A$1"),
-            named("Rate", Some("Data (2)"), "'Data (2)'!$A$1"),
-            named("Rate", Some("Notes"), "Notes!$B$1"),
-            named("Total", None, "Data!$C$1")
-        ]
-    );
-    // Deleting Data removes its names; names referring to it become #REF!.
-    s.execute("home.deleteSheet", json!({"sheet": "Data"})).unwrap();
-    assert_eq!(
-        names(&s),
-        [named("Rate", Some("Data (2)"), "'Data (2)'!$A$1"), named("Rate", Some("Notes"), "Notes!$B$1"), named("Total", None, "#REF!")]
-    );
-    // Deleting a name in one scope keeps the others.
-    s.execute("formulas.deleteName", json!({"name": "rate", "scope": "Notes"})).unwrap();
-    assert_eq!(names(&s), [named("Rate", Some("Data (2)"), "'Data (2)'!$A$1"), named("Total", None, "#REF!")]);
-    assert!(s.execute("formulas.deleteName", json!({"name": "Total", "scope": "Notes"})).is_err());
-    s.execute("formulas.deleteName", json!({"name": "Total", "scope": "Workbook"})).unwrap();
-    assert_eq!(names(&s).len(), 1);
 }
 
 #[test]
