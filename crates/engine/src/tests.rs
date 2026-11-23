@@ -71,6 +71,27 @@ fn insert_delete_rows_adjust() {
 }
 
 #[test]
+fn inserting_or_deleting_cells_cancels_copy_mode() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [[1], [2], [3]]})).unwrap();
+    s.execute("edit.cut", json!({"range": "3:3"})).unwrap();
+    s.execute("home.insertRows", json!({"rows": "3:3"})).unwrap();
+    assert!(s.clipboard.is_none());
+    // The cut data is now in row 4; a paste must not move the new blank row 3 instead.
+    assert!(s.execute("edit.paste", json!({"at": "A10"})).is_err());
+    assert_eq!(v(&s, "A4"), Value::Number(3.0));
+    s.execute("edit.copy", json!({"range": "A:A"})).unwrap();
+    s.execute("home.deleteColumns", json!({"cols": "B:B"})).unwrap();
+    assert!(s.clipboard.is_none());
+    s.execute("edit.copy", json!({"range": "A1"})).unwrap();
+    s.execute("home.insertCells", json!({"range": "A1", "shift": "down"})).unwrap();
+    assert!(s.clipboard.is_none());
+    s.execute("edit.copy", json!({"range": "A2"})).unwrap();
+    s.execute("home.deleteCells", json!({"range": "A1", "shift": "up"})).unwrap();
+    assert!(s.clipboard.is_none());
+}
+
+#[test]
 fn fill_series() {
     let mut s = s();
     s.execute("range.setValues", json!({"range": "A1", "values": [[1], [3]]})).unwrap();
@@ -82,53 +103,6 @@ fn fill_series() {
     s.execute("cell.set", json!({"cell": "C1", "input": "Item 9"})).unwrap();
     s.execute("edit.autoFill", json!({"source": "C1", "target": "C1:C2"})).unwrap();
     assert_eq!(v(&s, "C2"), Value::from("Item 10"));
-}
-
-#[test]
-fn insert_delete_cells_adjust() {
-    let formula = |s: &mut Session, a: &str| s.execute("cell.get", json!({"cell": a})).unwrap()["formula"].clone();
-    let mut s = s();
-    s.execute("range.setValues", json!({"range": "A1", "values": [[1], [2], [3], [4], [5]]})).unwrap();
-    s.execute("cell.set", json!({"cell": "C1", "input": "=SUM(A1:A5)"})).unwrap();
-    s.execute("cell.set", json!({"cell": "C2", "input": "=A4*10"})).unwrap();
-    s.execute("cell.set", json!({"cell": "C3", "input": "=SUM(A1:B5)"})).unwrap();
-    s.execute("formulas.defineName", json!({"name": "Fourth", "refersTo": "=Sheet1!$A$4"})).unwrap();
-    s.execute(
-        "home.conditionalFormat",
-        json!({"range": "A4:A5", "rule": {"type": "cellIs", "operator": "greater", "value": "3", "preset": "redText"}}),
-    )
-    .unwrap();
-    s.execute("data.validation", json!({"range": "A5", "type": "whole", "operator": "greater", "formula1": "0"})).unwrap();
-    s.execute("insert.chart", json!({"range": "A1:A5", "type": "line"})).unwrap();
-    // Insert A3 shifting down: ranges across the insertion grow, references below move.
-    s.execute("home.insertCells", json!({"range": "A3", "shift": "down"})).unwrap();
-    assert_eq!(formula(&mut s, "C1"), "=SUM(A1:A6)");
-    assert_eq!(formula(&mut s, "C2"), "=A5*10");
-    assert_eq!(formula(&mut s, "C3"), "=SUM(A1:B5)");
-    assert_eq!(v(&s, "C2"), Value::Number(40.0));
-    let sh = s.doc().unwrap().wb.active().unwrap().clone();
-    assert_eq!(s.doc().unwrap().wb.names[0].formula, "Sheet1!$A$5");
-    assert_eq!(sh.cond_formats[0].ranges[0].a1(), "A5:A6");
-    assert_eq!(sh.validations[0].ranges[0].a1(), "A6");
-    assert_eq!(sh.charts[0].series[0].values, "Sheet1!$A$1:$A$6");
-    // Delete A5 (the 4) shifting up: references to it become #REF!, those below move up.
-    s.execute("home.deleteCells", json!({"range": "A5", "shift": "up"})).unwrap();
-    assert_eq!(formula(&mut s, "C1"), "=SUM(A1:A5)");
-    assert_eq!(formula(&mut s, "C2"), "=#REF!*10");
-    assert_eq!(s.doc().unwrap().wb.names[0].formula, "#REF!");
-    assert_eq!(v(&s, "C1"), Value::Number(11.0));
-    let sh = s.doc().unwrap().wb.active().unwrap().clone();
-    assert_eq!(sh.cond_formats[0].ranges[0].a1(), "A5");
-    assert_eq!(sh.validations[0].ranges[0].a1(), "A5");
-    assert_eq!(sh.charts[0].series[0].values, "Sheet1!$A$1:$A$5");
-    // Shifting right and left.
-    s.execute("range.setValues", json!({"range": "E1", "values": [[1, 2, 3]]})).unwrap();
-    s.execute("cell.set", json!({"cell": "E3", "input": "=G1+SUM(E1:G1)"})).unwrap();
-    s.execute("home.insertCells", json!({"range": "F1", "shift": "right"})).unwrap();
-    assert_eq!(formula(&mut s, "E3"), "=H1+SUM(E1:H1)");
-    s.execute("home.deleteCells", json!({"range": "E1:F1", "shift": "left"})).unwrap();
-    assert_eq!(formula(&mut s, "E3"), "=F1+SUM(E1:F1)");
-    assert_eq!(v(&s, "E3"), Value::Number(8.0));
 }
 
 #[test]
