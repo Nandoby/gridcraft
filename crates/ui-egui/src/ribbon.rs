@@ -132,7 +132,6 @@ pub fn show(app: &mut SheetApp, ui: &mut Ui) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     ui.add_space(8.0);
-                    file_menu(app, ui);
                     let mut tabs: Vec<&str> = TABS.to_vec();
                     let ctx_tabs = contextual_tabs(app);
                     tabs.extend(ctx_tabs.iter());
@@ -201,32 +200,6 @@ pub fn show(app: &mut SheetApp, ui: &mut Ui) {
                 });
             });
         });
-}
-
-fn file_menu(app: &mut SheetApp, ui: &mut Ui) {
-    let t = Tokens::get(ui.ctx());
-    let label = egui::RichText::new("File").font(theme::ui_font(13.5)).color(t.accent);
-    let file = ui.add_sized(vec2(46.0, 30.0), egui::Button::new(label).frame(false));
-    egui::Popup::menu(&file).show(|ui| {
-        for (label, id, needs_document) in [
-            ("New Workbook", "file.new", false),
-            ("Open…", "file.open", false),
-            ("Save", "file.save", true),
-            ("Save As…", "file.saveAs", true),
-            ("Close", "file.close", true),
-        ] {
-            if id == "file.save" || id == "file.close" {
-                ui.separator();
-            }
-            if ui.add_enabled(!needs_document || app.session.active().is_some(), egui::Button::new(label)).clicked() {
-                // File operations must include the cell the user is still editing.
-                if app.commit_edit(0, 0, false, false) {
-                    app.run_or_alert(id, json!({}));
-                }
-                ui.close();
-            }
-        }
-    });
 }
 
 fn contextual_tabs(app: &SheetApp) -> Vec<&'static str> {
@@ -379,6 +352,7 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
             if b {
                 act(app, "home.borders", json!({"preset": app.grid.last_border.clone()}));
             }
+            ba.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Border presets"));
             egui::Popup::menu(&ba).show(|ui| {
                 for (label, preset) in [
                     ("Bottom Border", "bottom"),
@@ -396,7 +370,7 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
                     ("Top and Double Bottom Border", "topDoubleBottom"),
                     ("Inside Borders", "inside"),
                 ] {
-                    if ui.add(egui::Button::new(label).frame(false).min_size(vec2(220.0, 20.0))).clicked() {
+                    if crate::border_preview::preset_button(ui, label, preset).clicked() {
                         app.grid.last_border = preset.to_string();
                         act(app, "home.borders", json!({"preset": preset}));
                     }
