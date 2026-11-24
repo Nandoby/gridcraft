@@ -15,6 +15,7 @@ pub mod editor;
 pub mod formula_bar;
 pub mod grid;
 pub mod icons;
+pub mod keytips;
 pub mod panes;
 pub mod pivot_pane;
 pub mod ribbon;
@@ -132,6 +133,8 @@ pub struct SheetApp {
     fonts_set: bool,
     effective_dark: bool,
     pub name_box: Option<String>,
+    /// Transient ribbon keyboard navigation; never saved with UI preferences.
+    pub keytips: keytips::KeyTips,
     pub(crate) shots: control::Shots,
     /// Chart selected on the sheet (id).
     pub selected_chart: Option<u32>,
@@ -162,6 +165,7 @@ impl SheetApp {
             fonts_set: false,
             effective_dark: false,
             name_box: None,
+            keytips: keytips::KeyTips::default(),
             shots: control::Shots::default(),
             selected_chart: None,
             started: now_ms(),
@@ -444,6 +448,7 @@ impl SheetApp {
         }
         let t0 = now_ms();
         let t = theme::Tokens::get(&ctx);
+        self.ribbon_keys(&ctx);
         ribbon::title_bar(self, ui);
         ribbon::show(self, ui);
         if self.ui.formula_bar {
@@ -496,6 +501,41 @@ impl SheetApp {
         }
     }
 
+    fn ribbon_keys(&mut self, ctx: &egui::Context) {
+        let before = self.keytips.prefix().map(str::to_string);
+        let enabled = self.editor.is_none()
+            && self.dialog.is_none()
+            && self.message.is_none()
+            && self.name_box.is_none()
+            && !ctx.text_edit_focused()
+            && self.grid.context_menu.is_none()
+            && self.grid.header_menu.is_none()
+            && self.grid.filter_menu.is_none()
+            && self.grid.list_picker.is_none()
+            && self.grid.renaming_tab.is_none()
+            && (before.is_some() || !egui::Popup::is_any_open(ctx));
+        let actions = self.keytips.process(ctx, enabled);
+        if before.is_some() && before.as_deref() != self.keytips.prefix() && !ctx.input(|i| i.pointer.any_pressed()) {
+            // Leave pointer cancellation to the popup so clicking a menu item still works.
+            egui::Popup::close_all(ctx);
+        }
+        // The legacy Edit/Format paths lead to the same existing Home menus.
+        if matches!(self.keytips.prefix(), Some("E" | "O" | "OC")) {
+            self.run_or_alert("ui.ribbonTab", json!({"tab": "Home"}));
+            self.ui.ribbon_collapsed = false;
+        }
+        for action in actions {
+            match action {
+                keytips::Action::Home => {
+                    self.run_or_alert("ui.ribbonTab", json!({"tab": "Home"}));
+                    self.ui.ribbon_collapsed = false;
+                }
+                keytips::Action::Command(id) => self.run_or_alert(id, json!({})),
+                keytips::Action::Dialog(name) => self.open_dialog(name, json!({})),
+            }
+        }
+    }
+
     /// Current selection's top-left cell text as A1 (for the Name Box).
     pub fn name_box_text(&self) -> String {
         let Some(d) = self.session.active() else { return String::new() };
@@ -530,7 +570,6 @@ pub fn clean_error(e: &str) -> String {
     e.to_string()
 }
 
-#[allow(clippy::disallowed_methods)] // the clock is read only off wasm
 pub fn now_ms() -> f64 {
     #[cfg(not(target_arch = "wasm32"))]
     {
