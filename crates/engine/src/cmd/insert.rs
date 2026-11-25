@@ -122,7 +122,6 @@ pub fn specs() -> Vec<CommandSpec> {
             s,
             &with(p, "kind", json!("textBox"))
         )),
-        cmd!("shape.setText", "Edit Text Box", [], None, "{id: textBox id, text: string}", has_doc, shape_set_text),
         cmd!("object.delete", "Delete Object", [], None, "{kind: chart|image|shape, id}", has_doc, delete_object),
         cmd!("object.move", "Move Object", [], None, "{kind: chart|image|shape, id, at?: \"C3\", dx?, dy?, width?, height?}", has_doc, move_object),
         cmd!(
@@ -655,19 +654,44 @@ fn chart_switch(s: &mut Session, p: &Json) -> Result<Json> {
     edit(s, |cx| {
         let Some(sh) = cx.wb.sheet(si) else { return Ok(Json::Null) };
         let Some(c) = sh.charts.get(ci) else { return Ok(Json::Null) };
-        let Some(src) = c.source.clone() else { return Ok(Json::Null) };
+        // Charts read from a file have no source range: take the block their series span.
+        let Some((src, by_rows)) = c.source.clone().map(|s| (s, c.by_rows)).or_else(|| series_block(&c.series)) else { return Ok(Json::Null) };
         let (sheet_name, body) = split_sheet(&src);
         let src_sheet = sheet_name.and_then(|n| cx.wb.sheet_index(&n)).unwrap_or(si);
         let Some(r) = RangeRef::parse(body) else { return Ok(Json::Null) };
         let Some(ssh) = cx.wb.sheet(src_sheet) else { return Ok(Json::Null) };
-        let by_rows = !c.by_rows;
+        let by_rows = !by_rows;
         let series = series_from_range(ssh, r, by_rows);
         if let Some(c) = cx.sheet_mut(si)?.charts.get_mut(ci) {
+            c.source.get_or_insert(src);
             c.by_rows = by_rows;
             c.series = series;
         }
         Ok(Json::Null)
     })
+}
+
+/// The block a chart's series come from, and whether each series is a row of it: the bounding
+/// range of the series names, categories and values, when they're all references to one sheet.
+fn series_block(series: &[Series]) -> Option<(String, bool)> {
+    let mut sheet: Option<String> = None;
+    let mut bounds: Option<RangeRef> = None;
+    let mut rows = 0;
+    for s in series {
+        for (i, f) in [Some(&s.values), s.categories.as_ref(), s.name.as_ref()].into_iter().flatten().enumerate() {
+            let Ok(gridcraft_formula::Expr::Ref(r)) = gridcraft_formula::parse(f) else { return None };
+            let gridcraft_formula::SheetSel::Named(n) = &r.sheet else { return None };
+            if !sheet.get_or_insert_with(|| n.clone()).eq_ignore_ascii_case(n) {
+                return None;
+            }
+            let range = r.range();
+            if i == 0 && range.height() == 1 && range.width() > 1 {
+                rows += 1;
+            }
+            bounds = Some(bounds.map_or(range, |b| b.union(&range)));
+        }
+    }
+    Some((format!("{}!{}", gridcraft_formula::quote_sheet(&sheet?), bounds?.a1()), rows > 0 && rows == series.len()))
 }
 
 fn chart_delete(s: &mut Session, p: &Json) -> Result<Json> {
@@ -774,37 +798,6 @@ fn insert_shape(s: &mut Session, p: &Json) -> Result<Json> {
     edit(s, |cx| {
         cx.sheet_mut(sheet)?.shapes.push(shape);
         Ok(json!({"shape": id}))
-    })
-}
-
-/// A text box holds at most as many characters as a cell.
-const SHAPE_TEXT_MAX_CHARS: usize = 32_767;
-
-fn shape_set_text(s: &mut Session, p: &Json) -> Result<Json> {
-    let id =
-        p.get("id").and_then(Json::as_u64).and_then(|id| u32::try_from(id).ok()).ok_or_else(|| bad("shape.setText", "`id` must be a text box id"))?;
-    let text = str_param(p, "text").ok_or_else(|| bad("shape.setText", "`text` must be a string"))?;
-    if text.chars().nth(SHAPE_TEXT_MAX_CHARS).is_some() {
-        return Err(bad("shape.setText", "`text` is longer than 32,767 characters"));
-    }
-    let d = s.doc()?;
-    let sheet = d.wb.active_sheet;
-    let sh = d.wb.active().ok_or_else(|| bad("shape.setText", "no such text box"))?;
-    let shape = sh.shapes.iter().find(|shape| shape.id == id).ok_or_else(|| bad("shape.setText", "no such text box"))?;
-    if shape.kind != ShapeKind::TextBox {
-        return Err(bad("shape.setText", "the shape is not a text box"));
-    }
-    // Sheet protection locks drawing objects (there is no "edit objects" allowance yet).
-    if sh.is_protected() {
-        return Err(EngineError::Other(PROTECTED.into()));
-    }
-    if shape.text == text {
-        return ok();
-    }
-    edit(s, |cx| {
-        let shape = cx.sheet_mut(sheet)?.shapes.iter_mut().find(|shape| shape.id == id).ok_or_else(|| bad("shape.setText", "no such text box"))?;
-        shape.text = text.into();
-        Ok(Json::Null)
     })
 }
 
